@@ -533,12 +533,13 @@ func (c *Consumer) makeAccessTokenRequestWithParams(params map[string]string, se
 }
 
 type RoundTripper struct {
-	consumer *Consumer
-	token    *AccessToken
+	consumer        *Consumer
+	token           *AccessToken
+	embedAuthParams bool
 }
 
-func (c *Consumer) MakeRoundTripper(token *AccessToken) (*RoundTripper, error) {
-	return &RoundTripper{consumer: c, token: token}, nil
+func (c *Consumer) MakeRoundTripper(token *AccessToken, embedAuthParams bool) (*RoundTripper, error) {
+	return &RoundTripper{consumer: c, token: token, embedAuthParams: embedAuthParams}, nil
 }
 
 func (c *Consumer) MakeHttpClient(token *AccessToken) (*http.Client, error) {
@@ -921,19 +922,11 @@ func (rt *RoundTripper) RoundTrip(userRequest *http.Request) (*http.Response, er
 		return nil, err
 	}
 
-	authParams.Add(SIGNATURE_PARAM, signature)
-
-	// Set auth header.
-	oauthHdr := OAUTH_HEADER
-	for pos, key := range authParams.Keys() {
-		for innerPos, value := range authParams.Get(key) {
-			if pos+innerPos > 0 {
-				oauthHdr += ","
-			}
-			oauthHdr += key + "=\"" + value + "\""
-		}
+	if rt.embedAuthParams {
+		embedAuthParamsInUrl(authParams, signature, serverRequest)
+	} else {
+		addAuthParamsToHeader(authParams, signature, serverRequest)
 	}
-	serverRequest.Header.Add(HTTP_AUTH_HEADER, oauthHdr)
 
 	if rt.consumer.debug {
 		fmt.Printf("Request: %v\n", serverRequest)
@@ -946,6 +939,37 @@ func (rt *RoundTripper) RoundTrip(userRequest *http.Request) (*http.Response, er
 	}
 
 	return resp, nil
+}
+
+func embedAuthParamsInUrl(authParams *OrderedParams, signature string, serverRequest *http.Request) {
+	inlineAuthParams := make(url.Values)
+	for _, key := range authParams.Keys() {
+		for _, value := range authParams.Get(key) {
+			inlineAuthParams.Add(key, value)
+		}
+	}
+	inlineAuthParams.Add(SIGNATURE_PARAM, signature)
+
+	url := serverRequest.URL
+	if url.RawQuery != "" {
+		url.RawQuery += "&"
+	}
+	url.RawQuery += inlineAuthParams.Encode()
+}
+
+func addAuthParamsToHeader(authParams *OrderedParams, signature string, serverRequest *http.Request) {
+	authParams.Add(SIGNATURE_PARAM, signature)
+	// Set auth header.
+	oauthHdr := OAUTH_HEADER
+	for pos, key := range authParams.Keys() {
+		for innerPos, value := range authParams.Get(key) {
+			if pos+innerPos > 0 {
+				oauthHdr += ","
+			}
+			oauthHdr += key + "=\"" + value + "\""
+		}
+	}
+	serverRequest.Header.Add(HTTP_AUTH_HEADER, oauthHdr)
 }
 
 func (c *Consumer) makeAuthorizedRequest(method string, url string, dataLocation DataLocation, body string, userParams map[string]string, token *AccessToken) (resp *http.Response, err error) {
