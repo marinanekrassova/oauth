@@ -533,13 +533,14 @@ func (c *Consumer) makeAccessTokenRequestWithParams(params map[string]string, se
 }
 
 type RoundTripper struct {
-	consumer        *Consumer
-	token           *AccessToken
-	embedAuthParams bool
+	consumer          *Consumer
+	token             *AccessToken
+	embedAuthParams   bool
+	skipTokenEscaping bool
 }
 
-func (c *Consumer) MakeRoundTripper(token *AccessToken, embedAuthParams bool) (*RoundTripper, error) {
-	return &RoundTripper{consumer: c, token: token, embedAuthParams: embedAuthParams}, nil
+func (c *Consumer) MakeRoundTripper(token *AccessToken, embedAuthParams bool, skipTokenEscaping bool) (*RoundTripper, error) {
+	return &RoundTripper{consumer: c, token: token, embedAuthParams: embedAuthParams, skipTokenEscaping: skipTokenEscaping}, nil
 }
 
 func (c *Consumer) MakeHttpClient(token *AccessToken) (*http.Client, error) {
@@ -884,7 +885,11 @@ func (rt *RoundTripper) RoundTrip(userRequest *http.Request) (*http.Response, er
 	// specified. By omitting this parameter when it is not specified, allows
 	// two-legged OAuth calls.
 	if len(rt.token.Token) > 0 {
-		allParams.Add(TOKEN_PARAM, rt.token.Token)
+		if rt.skipTokenEscaping {
+			allParams.AddUnescaped(TOKEN_PARAM, rt.token.Token)
+		} else {
+			allParams.Add(TOKEN_PARAM, rt.token.Token)
+		}
 	}
 
 	if rt.consumer.serviceProvider.BodyHash {
